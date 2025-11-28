@@ -57,10 +57,12 @@ export async function buildPageDetailsParallel(
      */
     function extractPages(items: SidebarItem[], flattenedList: SidebarItem[]): SidebarItem[] {
         for (const item of items) {
-            if (item.children.length == 0 && item.url && item.url !== '#' && !item.url.endsWith('/#')) {
+            const isNavigablePage = item.url && item.url !== '#' && !item.url.endsWith('/#');
+
+            if (isNavigablePage) {
                 flattenedList.push({ ...item });
             }
-            
+
             if (item.children && item.children.length > 0) {
                 extractPages(item.children, flattenedList);
             }
@@ -290,10 +292,14 @@ export interface PdfGenerationOptions {
      * A common balance for I/O-bound tasks is to set this to 1.5 to 2 times the number of CPU cores.
      */
     pageConcurrency: number;
+    /**
+     * Whether to generate an automatic table of contents page based on the sidebar structure.
+     */
+    generateToc: boolean;
 }
 
 async function convertDocusaurusPageToPdf(
-    {docsUrl, pdfPath, pdfCoverImage, pdfMarginMm, pageConcurrency}:
+    {docsUrl, pdfPath, pdfCoverImage, pdfMarginMm, pageConcurrency, generateToc}:
     PdfGenerationOptions
 ): Promise<void> {
     // Define the PDF paper format (e.g., 'A4'). This dictates the physical page dimensions.
@@ -317,6 +323,32 @@ async function convertDocusaurusPageToPdf(
         await page.waitForSelector('#__docusaurus', {timeout: 60000});
         await page.evaluate(expandDocusaurusSidebar);
         return await page.evaluate(extractDocusaurusSidebarItems);
+    }
+
+    /**
+     * Helper function: Normalizes sidebar item URLs so category index pages generated
+     * from `category.json` are treated as real, navigable pages even when their links
+     * are represented with relative paths.
+     */
+    function normalizeSidebarItemUrls(items: SidebarItem[], baseDocsUrl: string): SidebarItem[] {
+        return items.map((item) => {
+            const hasValidUrl = item.url && item.url !== '#' && !item.url.endsWith('/#');
+            const normalizedUrl = hasValidUrl
+                ? item.url
+                : (item.path && item.path !== '#'
+                    ? new URL(item.path, baseDocsUrl).href
+                    : '');
+
+            const normalizedChildren = item.children && item.children.length > 0
+                ? normalizeSidebarItemUrls(item.children, baseDocsUrl)
+                : [];
+
+            return {
+                ...item,
+                url: normalizedUrl,
+                children: normalizedChildren,
+            };
+        });
     }
     
     let browser: Browser | undefined;
@@ -358,11 +390,14 @@ async function convertDocusaurusPageToPdf(
         console.log("[Stage 2/4 - Data Collection] Building sidebar structure...");
         const sidebarItems: SidebarItem[] = await buildSidebarItems(page, docsUrl);
         console.log(`[Stage 2/4 - Data Collection] Sidebar structure built with ${sidebarItems.length} top-level items.`);
+
+        const normalizedSidebarItems = normalizeSidebarItemUrls(sidebarItems, docsUrl);
+        console.log("[Stage 2/4 - Data Collection] Normalized sidebar URLs to include category index pages.");
         
         const buildDetailsStartTime = Date.now();
         console.log(`[Stage 2/4 - Data Collection] Starting concurrent content extraction for all documentation pages.`);
         
-        const pageDetails = await buildPageDetailsParallel(browser, sidebarItems, pageConcurrency);
+        const pageDetails = await buildPageDetailsParallel(browser, normalizedSidebarItems, pageConcurrency);
         const buildDetailsEndTime = Date.now();
         const buildDetailsDuration = (buildDetailsEndTime - buildDetailsStartTime) / 1000;
         console.log(`[Stage 2/4 - Data Collection] Content extraction completed. Took ${buildDetailsDuration.toFixed(2)} seconds.`);
@@ -381,8 +416,10 @@ async function convertDocusaurusPageToPdf(
             console.warn("[Stage 3/4 - HTML Rendering] PDF Cover Image URL was provided but image data could not be retrieved. Skipping cover page.");
         }
         
-        const tocHtml = generateTocHtml(sidebarItems, '目录');
-        html += tocHtml;
+        if (generateToc) {
+            const tocHtml = generateTocHtml(normalizedSidebarItems, '目录');
+            html += tocHtml;
+        }
         
         for (const singlePageDetail of pageDetails) { // Renamed 'page' to 'singlePageDetail' for clarity
             html += singlePageDetail.html;
@@ -507,6 +544,7 @@ async function main() {
             .option('-c, --pdf-cover-image <pathOrUrl>', 'Optional. The URL or local file path (e.g., "cover.jpg", "/path/to/cover.jpg" "file:///path/to/image.jpg") for the PDF cover image.')
             .option('-m, --pdf-margin-mm <number>', 'The margin size in millimeters to apply to all sides of the PDF pages.', '10')
             .option('-p, --page-concurrency <number>', 'The maximum number of concurrent browser pages to use for content fetching (e.g., 5, 10). Defaults to 2x CPU cores.', `${os.cpus().length * 2}`)
+            .option('--disable-toc', 'Disable automatic table of contents generation.')
             .parse(process.argv); // Parse the arguments
         
         const options = program.opts(); // Get the parsed options
@@ -523,6 +561,7 @@ async function main() {
             pdfCoverImage: options.pdfCoverImage as string | undefined,
             pdfMarginMm: parseInt(options.pdfMarginMm, 10),
             pageConcurrency: parseInt(options.pageConcurrency, 10),
+            generateToc: !options.disableToc,
         };
         if (isNaN(pdfGenerationOptions.pdfMarginMm)) {
             console.warn(`[Arg Parser] Warning: --pdf-margin-mm could not be parsed as a number. Using default of 10mm.`);
