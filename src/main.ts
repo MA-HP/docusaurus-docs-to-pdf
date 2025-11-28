@@ -96,10 +96,27 @@ export async function buildPageDetailsParallel(
             await page.goto(sidebarItem.url, { waitUntil: 'networkidle0', timeout: 60000 });
             
             // Wait for the main Docusaurus content container to be present in the DOM.
-            // This ensures the primary content area is rendered before proceeding.
-            // Note: The selector targets a specific Docusaurus theme layout component.
-            await page.waitForSelector('div[class^="docItemContainer"]>article>div[class*="theme-doc-markdown"]', { timeout: 60000 });
-            console.log(`[Worker ${workerId}] Page "${sidebarItem.title}" loaded and main content selector found.`);
+            // Category index pages sometimes render a generated index without the markdown wrapper
+            // used on doc detail pages, so we probe a handful of possible selectors and continue
+            // with the first one that is found.
+            const contentSelectors = [
+                'div[class^="docItemContainer"]>article>div[class*="theme-doc-markdown"]',
+                'div[class^="docItemContainer"] article',
+                'article[class*="generatedIndexPage"]',
+                'main article'
+            ];
+
+            await page.waitForFunction(
+                (selectors: string[]) => selectors.some((selector) => document.querySelector(selector)),
+                { timeout: 60000 },
+                contentSelectors
+            );
+
+            const matchedSelector = await page.evaluate((selectors: string[]) => {
+                return selectors.find((selector) => document.querySelector(selector)) || selectors[0];
+            }, contentSelectors);
+
+            console.log(`[Worker ${workerId}] Page "${sidebarItem.title}" loaded; using selector "${matchedSelector}".`);
             
             // Execute a script within the page context to expand any collapsible <details> elements.
             // This ensures all hidden content is visible for extraction.
@@ -109,7 +126,7 @@ export async function buildPageDetailsParallel(
             // Update the main Docusaurus content element's ID to a unique, generated ID.
             // This is crucial for creating correct internal anchor links in the merged PDF.
             // The selector must match the one used for `waitForSelector` above.
-            await page.evaluate(updateElementId, 'div[class^="docItemContainer"]>article>div[class*="theme-doc-markdown"]', sidebarItem.id);
+            await page.evaluate(updateElementId, matchedSelector, sidebarItem.id);
             console.log(`[Worker ${workerId}] Element ID updated to "${sidebarItem.id}" for "${sidebarItem.title}".`);
             
             // Get the outer HTML of the content container using its new unique ID.
