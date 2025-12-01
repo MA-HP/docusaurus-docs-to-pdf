@@ -102,6 +102,7 @@ export async function buildPageDetailsParallel(
             const contentSelectors = [
                 'div[class^="docItemContainer"]>article>div[class*="theme-doc-markdown"]',
                 'div[class^="docItemContainer"] article',
+                'div[class*="generatedIndexPage"]',
                 'article[class*="generatedIndexPage"]',
                 'main article'
             ];
