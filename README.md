@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This is a Node.js and Puppeteer-based command-line tool designed to capture and merge Docusaurus website documentation content into a single PDF file. It aims to automate documentation archiving, offline reading, or generating printable versions.
+This is a Node.js and Puppeteer-based command-line tool designed to capture and merge Docusaurus website documentation content into a single PDF file. It aims to automate documentation archiving, offline reading, or generating printable versions. The bundled Puppeteer instance is configured to run **Firefox** rather than Chromium when generating PDFs.
 
 ## PDF example
 
@@ -30,6 +30,7 @@ yarn global add docusaurus-docs-to-pdf-ma
 
 ```bash
 # install dependencies (uses the bundled yarn without needing an npm token)
+PUPPETEER_PRODUCT=firefox \\
 corepack yarn install
 
 # build the CLI

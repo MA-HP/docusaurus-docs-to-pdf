@@ -1,5 +1,8 @@
 import puppeteer, {Browser, Page} from 'puppeteer';
 
+// Ensure Puppeteer launches Firefox instead of the default Chromium build.
+process.env.PUPPETEER_PRODUCT = "firefox";
+
 /**
  * Requests an image from a given URL using Puppeteer and returns its Base64 encoded data and MIME type.
  * This function navigates a Puppeteer page directly to the image URL, fetches its content,
